@@ -1,6 +1,6 @@
 import os
 
-input_dir = "/media/refraime/DATA2/Troy/chatgpt-rica-fica-api/rica-fica-chatgpt-processing/skew-docs-3"
+input_dir = "/media/refraime/DATA2/Troy/chatgpt-rica-fica-api/rica-fica-chatgpt-processing/skew-docs-2"
 files_ = os.listdir(input_dir)
 files = files_.copy()
 

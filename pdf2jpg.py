@@ -1,7 +1,7 @@
 import os
 from pdf2image import convert_from_path
 
-input_dir = "/media/refraime/DATA2/Troy/chatgpt-rica-fica-api/rica-fica-chatgpt-processing/skew-docs-2"
+input_dir = "scanned-or-photographed"
 
 for file in os.listdir(input_dir):
     if file[-4:] in ('.pdf', '.PDF'):

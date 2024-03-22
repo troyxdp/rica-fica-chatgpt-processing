@@ -1,9 +1,6 @@
 import cv2
 import numpy as np
-import pytesseract
-
-# NOTES:
-# - Can use 
+# import pytesseract
 
 def scale_image(image, scale=1):
     return cv2.resize(image, dsize=(0,0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
@@ -71,7 +68,7 @@ def segment_lines(image):
 
 
 # IMAGE FILE TO PROCESS
-IMAGE_NAME = "test-isolated-text/test-utility-bill-cropped-address-1.jpg"
+IMAGE_NAME = "scanned-or-photographed/1PDF00.jpg"
 
 
 
@@ -80,11 +77,11 @@ IMAGE_NAME = "test-isolated-text/test-utility-bill-cropped-address-1.jpg"
 SCALE = 1.0
 OUTPUT_SIZE = (600, 480)
 # Contrast Adjust Params
-CONTRAST_ALPHA = 1.2
+CONTRAST_ALPHA = 1.5
 # Smoothing Params
 SMOOTH_KERNEL_SIZE = 3
 # Thresholding Params
-THRESH = 200
+THRESH = 230
 # Dilation/Erosion Params
 MORPH_KERNEL_SIZE = (2, 2)
 
@@ -108,8 +105,8 @@ cv2.waitKey(0)
 
 # 1. RESIZE IMAGE
 if include_steps[0]:
-    # img = scale_image(img, SCALE)
-    img = resize_image(img, OUTPUT_SIZE)
+    img = scale_image(img, SCALE)
+    # img = resize_image(img, OUTPUT_SIZE)
     cv2.imshow('Resized Image', img)
     cv2.waitKey(0)
 
@@ -160,8 +157,8 @@ if not include_steps[6] == 0:
     cv2.imshow('Eroded Image', img)
 
 # Extract Text
-text = pytesseract.image_to_string(img)
-print(text)
+# text = pytesseract.image_to_string(img)
+# print(text)
 cv2.waitKey(0)
 
 # TERMINATE PROGRAM
