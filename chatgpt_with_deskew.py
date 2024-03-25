@@ -3,6 +3,8 @@ import base64
 import requests
 import json
 from skimage import io
+from skimage.transform import rotate
+from skimage.exposure import is_low_contrast
 from io import BytesIO
 import numpy as np
 import cv2
@@ -11,21 +13,31 @@ from Alyn.alyn.deskew import Deskew
 
 
 
+# TODO:
+# Make application thread safe (remove use of temp files)
+
+
+
 # OPENAI API KEY
-API_KEY = "GET_FROM_TXT_FILE"
+API_KEY = "find in API_KEY.txt"
 # FILE PATH TO IMAGE BEING PROCESSED
-file_path = "skew-docs-4/vodacom-bill-skewed.jpg"
+file_path = "scanned-or-photographed/Scan 17 May 23 120922.jpg"
 # BLURRINESS THRESHOLD
-BLURRINESS_THRESHOLD = 1500
+BLURRINESS_THRESHOLD = 631
+# CONTRAST FRACTION THRESHOLD
+FRACTION_THRESHOLD = 0.27
+# DISPLAY IMAGE AFTER DESKEWING
+DISPLAY_IMAGE = True
 
 
 
 # FUNCTION TO DESKEW IMAGE
 def deskew_image(image_path):
+    global DISPLAY_IMAGE
     # Deskew image
     deskew = Deskew(
             input_file=image_path,
-            display_image=True
+            display_image=DISPLAY_IMAGE
         )
     deskew.run()
 
@@ -47,17 +59,24 @@ deskewed_img = deskew_image(file_path)
 
 
 
-# DETECT BLURRINESS OF IMAGE
-def is_blurry(image_path, blur_threshold):
+# CHECK QUALITY OF IMAGE
+img = cv2.imread(file_path)
+# Detect blurriness of image
+def is_blurry(img, blur_threshold):
     # DETECT THE BLURRINESS OF AN IMAGE USING THE LAPLACIAN
-    img = cv2.imread(image_path)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
     return laplacian_var < blur_threshold, laplacian_var
-is_blurry, lap_var = is_blurry(file_path, 1700)
+is_blurry_, lap_var = is_blurry(img, BLURRINESS_THRESHOLD)
+# Check whether image is low contrast or not
+is_low_contrast_ = is_low_contrast(img, fraction_threshold=FRACTION_THRESHOLD)
 
-if is_blurry:
-    print(f"Image is blurry. Laplacian Variance = {lap_var}")
+# Check whether document is good enough quality to process
+if is_blurry_ or is_low_contrast_:
+    print(f"Image is blurry or has low contrast.")
+    print(f"Laplacian Variance = {lap_var}")
+    if is_low_contrast_:
+        print("Is low contrast.")
     print("Pushing to manual queue...")
 else:
     # CREATE PROMPT TO BE SENT WITH IMAGE GIVING EXTRACTION INSTRUCTIONS
@@ -68,7 +87,7 @@ else:
         - Issuing authority
         - Issued date (DD/MM/YYYY format)
         - Addressee full name (in all caps)
-        - Address (in format STREET, AREA, POSTAL CODE)
+        - Address (in format STREET, AREA, POSTAL CODE, also in all caps)
         from the document.
 
         Also, give me a rough check on the authenticity of the document. Check the...
@@ -102,88 +121,85 @@ else:
         snake case. 
     """
 
-
-
-    # PREP DATA FOR CHATGPT
-    try:
-        # CREATE TEMPORARY JPG FILE AND BASE64 ENCODE IT
-        # Create json payload that will be sent in the post request
-        with open('temp_files/temp_img.jpg', 'wb') as jpg:
-            jpg.write(deskewed_img)
-        # Create payload to send to ChatGPT
-        with open('temp_files/temp_img.jpg', 'rb') as jpg:
-            # Encode image
-            b64_encoded_img = base64.b64encode(jpg.read()).decode('utf-8')
-
-        # HEADERS USED BY POST REQUEST
-        headers = {
-            "Content-Type" : "application/json",
-            "Authorization" : f"Bearer {API_KEY}"
-        }
-        # PAYLOAD
-        extract_info_payload = {
-            "model": "gpt-4-vision-preview",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": extract_text_prompt
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": 
-                            {
-                                "url": f"data:image/jpeg;base64,{b64_encoded_img}"
-                            }
-                        }
-                    ]
-                }
-            ],
-            "max_tokens": 2000
-        }
-
-    except Exception as e:
-        print("Error: could not prep payload for ChatGPT")
-        print(e)
-
-
+    # CREATE TEMPORARY JPG FILE
+    with open('temp_files/temp_img.jpg', 'wb') as jpg:
+        jpg.write(deskewed_img)
 
     # SEND REQUEST AND EXTRACT RESPONSE
-    json_str=""
+    extracted_data = None
     try:
-        # SEND REQUEST AND DELETE TEMP FILE
-        extract_text_response = requests.post(
-                "https://api.openai.com/v1/chat/completions", 
-                headers=headers, 
-                json=extract_info_payload
-            )
-        os.remove('temp_files/temp_img.jpg')
+        for angle in (0, 90, 180, 270):
+            # CREATE ROTATED JPG FILE - FIRST ITERATION 0 degress, then 90, ..., then 270
+            img = io.imread('temp_files/temp_img.jpg').copy()
+            img = rotate(img, angle, resize=True)
+            io.imsave('temp_files/temp_to_send.jpg', (img*255).astype(np.uint8))
+            with open('temp_files/temp_to_send.jpg', 'rb') as jpg:
+                # Encode image
+                b64_encoded_img = base64.b64encode(jpg.read()).decode('utf-8')
 
-        # EXTRACT JSON RESPONSE AND PRINT IT
-        response = extract_text_response.json()
-        json_str = response["choices"][0]["message"]["content"][8:-4]
-        print(json_str)
+            # HEADERS USED BY POST REQUEST
+            headers = {
+                "Content-Type" : "application/json",
+                "Authorization" : f"Bearer {API_KEY}"
+            }
+            # PAYLOAD
+            extract_info_payload = {
+                "model": "gpt-4-vision-preview",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": extract_text_prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": 
+                                {
+                                    "url": f"data:image/jpeg;base64,{b64_encoded_img}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 2000
+            }
+            # SEND REQUEST AND DELETE TEMP FILE
+            extract_text_response = requests.post(
+                    "https://api.openai.com/v1/chat/completions", 
+                    headers=headers, 
+                    json=extract_info_payload
+                )
+
+            # EXTRACT JSON RESPONSE AND PRINT IT
+            response = extract_text_response.json()
+            json_str = response["choices"][0]["message"]["content"][8:-4]
+            print(json_str)
+            extract_json = json.loads(json_str)
+
+            # Check all data has been extracted. If so, copy to extracted_data and break loop
+            if not (extract_json["addressee_full_name"] == 'unknown' or extract_json['address'] == 'unknown'):
+                extracted_data = extract_json
+                break
     except Exception as e:
         print("Error: could not send request or could not successfully extract data from response")
         print(e)
+        # Here you would send to manual queue
+        # 
+        # send_to_manual_queue(file_path)
 
+    # CLEAR TEMP FILES
+    files = os.listdir('temp_files')
+    for file in files:
+        rm_path = os.path.join(os.getcwd(), 'temp_files', file)
+        os.remove(rm_path)
 
-
-    # EXTRACT JSON FROM RESPONSE STRING
-    extract_json = None
-    try:
-        extract_json = json.loads(json_str)
-        print("")
-        print(extract_json)
-    except Exception as e:
-        print("There was an error in extracting a JSON object from the response")
-        print(e)
-
-    if extract_json is None or extract_json["addressee_full_name"] == 'unknown' or extract_json['address'] == 'unknown':
+    if extracted_data is None:
         print("Pushing to manual queue...")
         # Here you would send (original) document to manual queue
+        # 
+        # send_to_manual_queue(file_path)
     else:
         print("Successfully extracted data")
         # Here you would check if the data is correct - something like...
@@ -192,3 +208,6 @@ else:
         #     send_to_manual_queue(file_path)
         # else:
         #     return "Data is valid"
+        # 
+        # You could also factor in the issuing authority of the document to edit the input
+        # data for comparison, e.g. what format full name will be in

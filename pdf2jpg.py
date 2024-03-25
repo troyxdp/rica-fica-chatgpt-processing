@@ -1,7 +1,7 @@
 import os
 from pdf2image import convert_from_path
 
-input_dir = "scanned-or-photographed"
+input_dir = "skew-docs-4"
 
 for file in os.listdir(input_dir):
     if file[-4:] in ('.pdf', '.PDF'):
