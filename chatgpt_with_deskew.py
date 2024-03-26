@@ -8,26 +8,76 @@ from skimage.exposure import is_low_contrast
 from io import BytesIO
 import numpy as np
 import cv2
+from pdf2image import convert_from_path
 from Alyn.alyn.skew_detect import SkewDetect
 from Alyn.alyn.deskew import Deskew
 
 
 
 # TODO:
-# Make application thread safe (remove use of temp files)
+# Add catering for different address formats based on which issuing authority document is from
+# Add catering for different name formats based on which issuing authority document is from
 
 
 
 # OPENAI API KEY
-API_KEY = "find in API_KEY.txt"
+API_KEY = "get_from_txt_file"
 # FILE PATH TO IMAGE BEING PROCESSED
-file_path = "scanned-or-photographed/Scan 17 May 23 120922.jpg"
+file_path = "skew-docs-4/SBSA_Statement_2023-04-29_3months.pdf"
 # BLURRINESS THRESHOLD
 BLURRINESS_THRESHOLD = 631
 # CONTRAST FRACTION THRESHOLD
 FRACTION_THRESHOLD = 0.27
 # DISPLAY IMAGE AFTER DESKEWING
 DISPLAY_IMAGE = True
+
+
+
+def send_chatgpt_request(prompt, base64_encoded_image):
+    global API_KEY
+    # HEADERS USED BY POST REQUEST
+    headers = {
+        "Content-Type" : "application/json",
+        "Authorization" : f"Bearer {API_KEY}"
+    }
+    # PAYLOAD
+    extract_info_payload = {
+        "model": "gpt-4-vision-preview",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": 
+                        {
+                            "url": f"data:image/jpeg;base64,{base64_encoded_image}"
+                        }
+                    }
+                ]
+            }
+        ],
+        "max_tokens": 2000
+    }
+    # SEND REQUEST AND DELETE TEMP FILE
+    extract_text_response = requests.post(
+            "https://api.openai.com/v1/chat/completions", 
+            headers=headers, 
+            json=extract_info_payload
+        )
+    return extract_text_response
+
+
+
+# CONVERT FILE TO JPG IF IT IS A PDF
+if file_path[-4:] in ('.pdf', '.PDF'):
+    img = convert_from_path(file_path)[0]
+    img.save(f"{file_path[:-4]}.jpg", "JPEG")
+    file_path = f"{file_path[:-4]}.jpg"
 
 
 
@@ -61,6 +111,7 @@ deskewed_img = deskew_image(file_path)
 
 # CHECK QUALITY OF IMAGE
 img = cv2.imread(file_path)
+
 # Detect blurriness of image
 def is_blurry(img, blur_threshold):
     # DETECT THE BLURRINESS OF AN IMAGE USING THE LAPLACIAN
@@ -68,8 +119,11 @@ def is_blurry(img, blur_threshold):
     laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
     return laplacian_var < blur_threshold, laplacian_var
 is_blurry_, lap_var = is_blurry(img, BLURRINESS_THRESHOLD)
+
 # Check whether image is low contrast or not
 is_low_contrast_ = is_low_contrast(img, fraction_threshold=FRACTION_THRESHOLD)
+
+
 
 # Check whether document is good enough quality to process
 if is_blurry_ or is_low_contrast_:
@@ -137,40 +191,7 @@ else:
                 # Encode image
                 b64_encoded_img = base64.b64encode(jpg.read()).decode('utf-8')
 
-            # HEADERS USED BY POST REQUEST
-            headers = {
-                "Content-Type" : "application/json",
-                "Authorization" : f"Bearer {API_KEY}"
-            }
-            # PAYLOAD
-            extract_info_payload = {
-                "model": "gpt-4-vision-preview",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": extract_text_prompt
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": 
-                                {
-                                    "url": f"data:image/jpeg;base64,{b64_encoded_img}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                "max_tokens": 2000
-            }
-            # SEND REQUEST AND DELETE TEMP FILE
-            extract_text_response = requests.post(
-                    "https://api.openai.com/v1/chat/completions", 
-                    headers=headers, 
-                    json=extract_info_payload
-                )
+            extract_text_response = send_chatgpt_request(extract_text_prompt, b64_encoded_img)
 
             # EXTRACT JSON RESPONSE AND PRINT IT
             response = extract_text_response.json()
@@ -179,9 +200,10 @@ else:
             extract_json = json.loads(json_str)
 
             # Check all data has been extracted. If so, copy to extracted_data and break loop
-            if not (extract_json["addressee_full_name"] == 'unknown' or extract_json['address'] == 'unknown'):
+            if not (extract_json["addressee_full_name"].lower() == 'unknown' or extract_json['address'].lower() == 'unknown'):
                 extracted_data = extract_json
                 break
+
     except Exception as e:
         print("Error: could not send request or could not successfully extract data from response")
         print(e)
@@ -197,7 +219,7 @@ else:
 
     if extracted_data is None:
         print("Pushing to manual queue...")
-        # Here you would send (original) document to manual queue
+        # Here you would send to manual queue
         # 
         # send_to_manual_queue(file_path)
     else:
