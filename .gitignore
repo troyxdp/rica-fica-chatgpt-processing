@@ -12,3 +12,4 @@ processed-documents/
 deskewed_images/
 scanned-or-photographed/
 API_KEY.txt
+.env

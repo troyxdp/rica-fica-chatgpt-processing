@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv, dotenv_values
 import base64
 import requests
 import json
@@ -8,7 +9,11 @@ from skimage.exposure import is_low_contrast
 from io import BytesIO
 import numpy as np
 import cv2
+from langchain_community.llms import Ollama
 from pdf2image import convert_from_path
+import google.generativeai as genai
+import PIL.Image
+
 from Alyn.alyn.skew_detect import SkewDetect
 from Alyn.alyn.deskew import Deskew
 
@@ -17,28 +22,36 @@ from Alyn.alyn.deskew import Deskew
 # TODO:
 # Add catering for different address formats based on which issuing authority document is from
 # Add catering for different name formats based on which issuing authority document is from
+# Potentially add details checking in the rotation loop. If incorrect, rotate (esp. for gemini)
+# If we go with gemini, remove deskewing - gemini seems to be able to work with skewed images
 
 
 
+load_dotenv()
 # OPENAI API KEY
-API_KEY = "get_from_txt_file"
+CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+# GOOGLE API KEY
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+genai.configure(api_key=GOOGLE_API_KEY)
 # FILE PATH TO IMAGE BEING PROCESSED
-file_path = "skew-docs-4/SBSA_Statement_2023-04-29_3months.pdf"
+file_path = "skew-docs-4/vodacom-bill-skewed.jpg"
 # BLURRINESS THRESHOLD
-BLURRINESS_THRESHOLD = 631
+BLURRINESS_THRESHOLD = 200 # 400 # 631
 # CONTRAST FRACTION THRESHOLD
-FRACTION_THRESHOLD = 0.27
+FRACTION_THRESHOLD = 0.25
 # DISPLAY IMAGE AFTER DESKEWING
 DISPLAY_IMAGE = True
 
 
 
-def send_chatgpt_request(prompt, base64_encoded_image):
-    global API_KEY
+# FUNCTIONS TO CALL APIs OR MODELS
+# Send API call to ChatGPT
+def send_to_chatgpt_vision(prompt, base64_encoded_image):
+    global CHATGPT_API_KEY
     # HEADERS USED BY POST REQUEST
     headers = {
         "Content-Type" : "application/json",
-        "Authorization" : f"Bearer {API_KEY}"
+        "Authorization" : f"Bearer {CHATGPT_API_KEY}"
     }
     # PAYLOAD
     extract_info_payload = {
@@ -64,12 +77,31 @@ def send_chatgpt_request(prompt, base64_encoded_image):
         "max_tokens": 2000
     }
     # SEND REQUEST AND DELETE TEMP FILE
-    extract_text_response = requests.post(
+    response = requests.post(
             "https://api.openai.com/v1/chat/completions", 
             headers=headers, 
             json=extract_info_payload
         )
-    return extract_text_response
+    try:
+        json_str = response.json()["choices"][0]["message"]["content"][8:-4]
+        return json_str
+    except Exception as e:
+        print(e)
+        return None
+
+# Call LLaVA model
+def send_to_llava(prompt, base64_encoded_image):
+    llava = Ollama(model='llava')
+    llm_with_image_context = llava.bind(images=[base64_encoded_image])
+    response = llm_with_image_context.invoke(prompt)
+    return response[9:-4]
+
+# Call gemini-pro-vision
+def send_to_gemini_pro_vision(prompt, image_path):
+    model = genai.GenerativeModel('gemini-pro-vision')
+    img = PIL.Image.open(image_path)
+    response = model.generate_content([prompt, img])
+    return response.text[8:-4]
 
 
 
@@ -134,7 +166,7 @@ if is_blurry_ or is_low_contrast_:
     print("Pushing to manual queue...")
 else:
     # CREATE PROMPT TO BE SENT WITH IMAGE GIVING EXTRACTION INSTRUCTIONS
-    extract_text_prompt = """
+    prompt = """
         Give me a detailed description of the document in the image. Tell me what is the... 
         - Document type
         - Document name
@@ -191,11 +223,11 @@ else:
                 # Encode image
                 b64_encoded_img = base64.b64encode(jpg.read()).decode('utf-8')
 
-            extract_text_response = send_chatgpt_request(extract_text_prompt, b64_encoded_img)
+            # json_str = send_to_chatgpt_vision(prompt, b64_encoded_img)
+            # json_str = send_to_llava(prompt, b64_encoded_img)
+            json_str = send_to_gemini_pro_vision(prompt, 'temp_files/temp_to_send.jpg')
 
             # EXTRACT JSON RESPONSE AND PRINT IT
-            response = extract_text_response.json()
-            json_str = response["choices"][0]["message"]["content"][8:-4]
             print(json_str)
             extract_json = json.loads(json_str)
 
