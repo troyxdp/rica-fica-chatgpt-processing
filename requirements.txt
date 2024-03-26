@@ -8,3 +8,8 @@ torchvision
 pillow
 tensorboard
 matplotlib
+numpy
+langchain
+google-generativeai
+skimage
+pdf2image

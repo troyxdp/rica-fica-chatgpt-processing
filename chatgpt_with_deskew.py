@@ -9,10 +9,11 @@ from skimage.exposure import is_low_contrast
 from io import BytesIO
 import numpy as np
 import cv2
-from langchain_community.llms import Ollama
 from pdf2image import convert_from_path
-import google.generativeai as genai
 import PIL.Image
+
+from langchain_community.llms import Ollama
+import google.generativeai as genai
 
 from Alyn.alyn.skew_detect import SkewDetect
 from Alyn.alyn.deskew import Deskew
@@ -27,12 +28,18 @@ from Alyn.alyn.deskew import Deskew
 
 
 
+# SELECT WHICH MODEL TO USE
+use_chatgpt = True
+use_llava = False
+use_gemini = False
+
+
+
 load_dotenv()
 # OPENAI API KEY
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 # GOOGLE API KEY
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=GOOGLE_API_KEY)
 # FILE PATH TO IMAGE BEING PROCESSED
 file_path = "skew-docs-4/vodacom-bill-skewed.jpg"
 # BLURRINESS THRESHOLD
@@ -41,6 +48,11 @@ BLURRINESS_THRESHOLD = 200 # 400 # 631
 FRACTION_THRESHOLD = 0.25
 # DISPLAY IMAGE AFTER DESKEWING
 DISPLAY_IMAGE = True
+
+
+
+# SETUP GENAI STUFF
+genai.configure(api_key=GOOGLE_API_KEY)
 
 
 
@@ -223,9 +235,12 @@ else:
                 # Encode image
                 b64_encoded_img = base64.b64encode(jpg.read()).decode('utf-8')
 
-            # json_str = send_to_chatgpt_vision(prompt, b64_encoded_img)
-            # json_str = send_to_llava(prompt, b64_encoded_img)
-            json_str = send_to_gemini_pro_vision(prompt, 'temp_files/temp_to_send.jpg')
+            if use_chatgpt:
+                json_str = send_to_chatgpt_vision(prompt, b64_encoded_img)
+            elif use_llava:
+                json_str = send_to_llava(prompt, b64_encoded_img)
+            else:
+                json_str = send_to_gemini_pro_vision(prompt, 'temp_files/temp_to_send.jpg')
 
             # EXTRACT JSON RESPONSE AND PRINT IT
             print(json_str)
